@@ -25,7 +25,18 @@ npm run preview
 
 La versión compilada se abre en **http://127.0.0.1:4173**. El build genera el manifiesto, íconos PNG y un service worker que precarga aplicación, importador y tipografías locales. El service worker sólo se registra en producción; no en `npm run dev`.
 
-Para instalar en el teléfono, publicá **el contenido de `dist/`** en un alojamiento estático con HTTPS (por ejemplo, GitHub Pages). La configuración usa rutas relativas, por lo que admite una subcarpeta. No hace falta configurar variables de entorno ni credenciales. No se publicó automáticamente en un servicio externo.
+Para instalar en el teléfono, publicá **el contenido de `dist/`** en un alojamiento estático con HTTPS (por ejemplo, GitHub Pages). La configuración usa rutas relativas, por lo que admite una subcarpeta. No hace falta configurar variables de entorno ni credenciales.
+
+### Publicar este repositorio en GitHub Pages
+
+El proyecto incluye `.github/workflows/deploy-pages.yml`, que instala dependencias, ejecuta las pruebas, compila y publica **sólo `dist/`** al subir cambios a `main`.
+
+1. En el repositorio, abrí **Settings → Pages → Build and deployment → Source** y seleccioná **GitHub Actions**.
+2. Subí el workflow a `main` junto con el proyecto. No hace falta subir `dist/` al repositorio.
+3. En **Actions**, esperá a que **Publicar Mis Inversiones** termine correctamente. También podés iniciarlo con **Run workflow**.
+4. Abrí https://tomascabrerabellomo.github.io/Mis-Inversiones/.
+
+No uses **Deploy from a branch → main → / (root)** para este proyecto: eso sirve el `index.html` de desarrollo, que referencia `/src/main.tsx`, y deja la página sin iniciar. GitHub Pages necesita los archivos JavaScript y CSS generados por Vite. Una ejecución exitosa del workflow predeterminado de Pages no verifica que React haya sido compilado.
 
 - Android / Chrome / Edge: menú → **Instalar aplicación**, o el botón en Ajustes cuando el navegador lo ofrezca.
 - iPhone / Safari: Compartir → **Agregar a inicio**.
