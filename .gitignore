@@ -1,0 +1,9 @@
+node_modules/
+dist/
+output/
+.playwright-cli/
+.env*
+*.xlsx
+*.xls
+*.local.csv
+*.tsbuildinfo

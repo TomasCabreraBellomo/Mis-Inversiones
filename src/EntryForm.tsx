@@ -1,0 +1,43 @@
+import { useState, type FormEvent } from 'react';
+import { type Data, type Movement, type Currency, type Valuation, eventKinds, uid, now, today, dateEnd, money } from './model';
+import { validateMovement } from './engine';
+import { Field, Notice } from './components';
+export function EntryForm({ data, initial, opening, onSave }: { data: Data; initial?: Movement; opening?: Valuation; onSave: (next: Data) => Promise<void> }) {
+  const [kind, setKind] = useState<string>(initial?.kind ?? (opening ? 'Apertura' : 'Compra'));
+  const [accountId, setAccount] = useState(initial?.accountId ?? opening?.accountId ?? data.accounts[0]?.id ?? '');
+  const [assetId, setAsset] = useState(initial?.assetId ?? (opening && data.assets.find(a => a.id === opening.assetId)?.type !== 'Efectivo' ? opening.assetId : '') ?? '');
+  const [currency, setCurrency] = useState<Currency>(initial?.currency ?? opening?.currency ?? 'ARS');
+  const [error,setError] = useState(''), [saving,setSaving] = useState(false);
+  const trade = ['Compra','Venta'].includes(kind), assetRequired = trade || ['Precio','Valuación'].includes(kind);
+  const needsAmount = !trade && !['Precio','Dólar'].includes(kind);
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault(); setError(''); setSaving(true);
+    try {
+      const f = new FormData(e.currentTarget), get = (k: string) => String(f.get(k) ?? ''), n = (k:string) => Number(get(k));
+      const date = get('date'), next = structuredClone(data), id = initial?.id ?? uid(), updatedAt = now();
+      if (kind === 'Dólar') { if (!(n('buy') > 0) || !(n('sell') > 0)) throw new Error('Compra y venta deben ser mayores a cero.'); next.fx.push({ id, updatedAt, date, kind: get('fxKind') as 'MEP'|'Blue'|'Manual', buy: n('buy'), sell: n('sell'), source: get('source') || 'Manual' }); }
+      else if (kind === 'Precio') { if (!assetId || !(n('price') > 0)) throw new Error('Elegí un activo y un precio mayor a cero.'); const asset = data.assets.find(a => a.id === assetId)!; if (currency !== asset.currency) throw new Error('El precio debe usar la moneda de cotización del activo.'); next.prices.push({ id, updatedAt, date, assetId, currency, value:n('price'), source: get('source') || 'Manual' }); }
+      else if (kind === 'Valuación') { if (!accountId || !assetId) throw new Error('Elegí cuenta y activo.'); const previous = next.valuations.find(v => v.date === date && v.accountId === accountId && v.assetId === assetId); const valuation: Valuation = { id: previous?.id ?? id, updatedAt, date, precision: 'day', scope: 'adjustment', assetId, accountId, currency, amount: get('amount') === '' ? null : n('amount'), note: get('note') }; if (previous) Object.assign(previous,valuation); else next.valuations.push(valuation); }
+      else {
+        const m: Movement = { id, updatedAt, createdAt: initial?.createdAt ?? initial?.updatedAt ?? updatedAt, date, kind: kind as Movement['kind'], accountId, assetId: assetId || undefined, currency, amount: trade ? n('quantity') * n('price') : n('amount'), fee: n('fee'), quantity: get('quantity') === '' ? undefined : n('quantity'), price: get('price') === '' ? undefined : n('price'), cost: get('cost') === '' ? undefined : n('cost'), toAccountId: get('toAccountId') || undefined, note: get('note') };
+        if (!['Compra','Venta','Apertura','Dividendo','Interés'].includes(kind)) m.assetId = undefined;
+        const validation = validateMovement(data,m); if (validation) throw new Error(validation);
+        if (kind === 'Apertura') { const duplicate = next.movements.find(x => x.id !== id && x.kind === 'Apertura' && x.accountId === accountId && x.assetId === m.assetId && x.currency === currency); if (duplicate) throw new Error('Ya existe una apertura para esa posición. Editala en Movimientos.'); }
+        next.movements = [...next.movements.filter(x => x.id !== id), m];
+      }
+      await onSave(next);
+    } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
+  }
+  return <form onSubmit={submit} className="entry-form"><div className="form-grid"><Field label="Tipo de registro" full><select value={kind} onChange={e=>setKind(e.target.value)} disabled={!!initial}>{[...eventKinds,'Valuación','Precio','Dólar'].map(k=><option key={k}>{k}</option>)}</select></Field><Field label="Fecha"><input name="date" type="date" required defaultValue={initial?.date ?? (opening ? dateEnd(opening.date) : today())}/></Field><Field label="Moneda"><select value={currency} onChange={e=>setCurrency(e.target.value as Currency)}><option>ARS</option><option>USD</option></select></Field>
+    {!['Dólar','Precio'].includes(kind) && <Field label="Cuenta"><select required value={accountId} onChange={e=>setAccount(e.target.value)}><option value="">Elegí una cuenta</option>{data.accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
+    {(assetRequired || ['Apertura','Dividendo','Interés'].includes(kind)) && <Field label={kind === 'Apertura' ? 'Posición de apertura' : 'Activo'}><select required={assetRequired} value={assetId} onChange={e=>{setAsset(e.target.value); const a=data.assets.find(a=>a.id===e.target.value); if(a)setCurrency(a.currency);}}><option value="">{kind==='Apertura'?'Saldo de efectivo':'Elegí un activo'}</option>{data.assets.filter(a=>kind==='Valuación'||a.type!=='Efectivo').map(a=><option key={a.id} value={a.id}>{a.ticker} · {a.market} · {a.currency}</option>)}</select></Field>}
+    {kind==='Transferencia' && <Field label="Cuenta de destino"><select name="toAccountId" required defaultValue={initial?.toAccountId}><option value="">Elegí el destino</option>{data.accounts.filter(a=>a.id!==accountId).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>}
+    {(trade || (kind==='Apertura'&&assetId)) && <Field label="Cantidad" hint="Unidades del activo, no su valor total"><input name="quantity" type="number" step="any" min={kind==='Apertura'?'0':'0.00000001'} required defaultValue={initial?.quantity}/></Field>}
+    {(trade||kind==='Precio') && <Field label={`Precio unitario (${currency})`}><input name="price" type="number" step="any" min="0.00000001" required defaultValue={initial?.price}/></Field>}
+    {needsAmount && <Field label={`${kind==='Apertura'&&assetId?'Valor de referencia':'Importe total'} (${currency})`} hint={kind==='Valuación'?'Vacío significa dato desconocido. Cero es una valuación explícita.':undefined}><input name="amount" type="number" step="any" min="0" required={kind!=='Valuación'} defaultValue={initial?.amount ?? opening?.amount ?? undefined}/></Field>}
+    {kind==='Apertura'&&assetId && <Field label={`Costo total de adquisición (${currency})`} hint="Incluí comisiones. Sin costo, la ganancia quedará pendiente."><input name="cost" type="number" step="any" min="0" defaultValue={initial?.cost}/></Field>}
+    {!['Dólar','Precio','Valuación','Apertura'].includes(kind) && <Field label={`Comisión (${currency})`}><input name="fee" type="number" step="any" min="0" defaultValue={initial?.fee ?? 0}/></Field>}
+    {kind==='Dólar' && <><Field label="Referencia"><select name="fxKind" defaultValue={data.settings.fxKind}><option>MEP</option><option>Blue</option><option>Manual</option></select></Field><Field label="Compra (ARS por USD)"><input name="buy" type="number" step="any" min="0.01" required/></Field><Field label="Venta (ARS por USD)"><input name="sell" type="number" step="any" min="0.01" required/></Field></>}
+    {['Precio','Dólar'].includes(kind) ? <Field label="Fuente" full><input name="source" placeholder="Ej.: cierre del bróker, cotización manual" required/></Field> : <Field label="Nota (opcional)" full><input name="note" defaultValue={initial?.note ?? (opening ? `Apertura desde ${opening.date} · ${money(opening.amount,opening.currency)}` : '')} placeholder="Un detalle para recordar"/></Field>}
+    </div>{kind==='Apertura'&&<Notice>La apertura reemplaza la base histórica para las operaciones posteriores. Para posiciones, cargá también un precio o una valuación si el corte no coincide con la fecha elegida. El efectivo se abre por separado.</Notice>}{kind==='Transferencia'&&<Notice>Se mueve efectivo en la misma moneda entre cuentas propias. No cuenta como aporte externo.</Notice>}{!data.accounts.length&&<Notice tone="warning">Primero agregá una cuenta en Ajustes.</Notice>}{error&&<p role="alert" className="form-error">{error}</p>}<div className="form-actions"><span>Se guarda en este dispositivo</span><button type="submit" className="button primary" disabled={saving}>{saving?'Guardando…':initial?'Guardar cambios':'Guardar registro'}</button></div></form>;
+}
